@@ -1,13 +1,13 @@
 purification:
-  total_num_iterations: 100
+  total_num_iterations: 50
   csgm_num_iterations: 100 #100
   purification_schedule: linear
   save_every_main: 100000
   save_every_sub: 100000
   optimizer: SGD
-  lr: 3
+  lr: 6
   momentum: 0.9
-  ddim_num_iterations: 100
+  ddim_num_iterations: 50
   full_ddim: True
   ddim_init_timestep: 400
   ddim_end_timestep: 0

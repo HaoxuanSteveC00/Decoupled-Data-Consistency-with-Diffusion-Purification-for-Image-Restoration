@@ -54,38 +54,23 @@ class FFHQDataset(VisionDataset):
         
         return img
     
-@register_dataset(name='ImageNet')
+@register_dataset(name='imagenet')
 class ImageNetDataset(VisionDataset):
     def __init__(self, root: str, transforms: Optional[Callable]=None):
         super().__init__(root, transforms)
 
-        self.fpaths = sorted(glob(root + '/**/*.JPEG', recursive=True))
+        self.fpaths = sorted(glob(root + '/**/*.png', recursive=True))
         assert len(self.fpaths) > 0, "File list is empty. Check the root."
 
     def __len__(self):
         return len(self.fpaths)
 
-    def __getitem__(self, index: int, resolution=256):
+    def __getitem__(self, index: int):
         fpath = self.fpaths[index]
         img = Image.open(fpath).convert('RGB')
-        img = img.resize((resolution, resolution), resample=Image.BICUBIC)
         
         if self.transforms is not None:
             img = self.transforms(img)
-
-        # img = img.resize((resolution, resolution), resample=Image.BICUBIC)
-        #img = img.resize((resolution, resolution), Image.BICUBIC)
-
-        '''
-        while min(*img.size) >= 2 * resolution:
-            img = img.resize(
-                tuple(x // 2 for x in img.size), resample=Image.BOX
-            )
-
-        scale = resolution / min(*img.size)
-        img = img.resize(
-            tuple(round(x * scale) for x in img.size), resample=Image.BICUBIC
-        )
-        '''
+        
         return img
     

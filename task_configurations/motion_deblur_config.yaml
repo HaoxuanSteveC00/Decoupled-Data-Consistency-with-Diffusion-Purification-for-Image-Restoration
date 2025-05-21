@@ -5,10 +5,10 @@ conditioning:
 
 measurement:
   operator:
-    name: super_resolution
-    in_shape: !!python/tuple [1, 3, 256, 256]
-    scale_factor: 4
-  
+    name: motion_blur
+    kernel_size: 61
+    intensity: 0.5
+
   noise: 
     name: gaussian
     sigma: 0.4472

@@ -2,7 +2,7 @@ from functools import partial
 import os
 import argparse
 import yaml
-
+import json
 import torch
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
@@ -16,12 +16,34 @@ from guided_diffusion.gaussian_diffusion import create_sampler
 from data.dataloader import get_dataset, get_dataloader
 from util.logger import get_logger
 
+# Compute metric
+from pathlib import Path
 from skimage.metrics import peak_signal_noise_ratio
-from skimage.metrics import structural_similarity as compare_ssim
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
-lpips = LearnedPerceptualImagePatchSimilarity(net_type='vgg')
+from tqdm import tqdm
+from os import listdir
 
-def get_lpips(img1, img2, lpips, device):
+import lpips
+from monai.metrics import PSNRMetric
+import numpy as np
+
+import PIL
+import torchvision.transforms.functional as transform
+import torchvision.utils as tvu
+import torchvision.transforms as transforms
+
+#from skimage.metrics import peak_signal_noise_ratio
+#from skimage.metrics import structural_similarity as compare_ssim
+#from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+#lpips = LearnedPerceptualImagePatchSimilarity(net_type='vgg')
+
+
+#metrics and transforms
+inv_transform = transforms.Compose([
+        transforms.Normalize((-1), (2)),
+        transforms.Lambda(lambda x: x.clamp(0, 1).detach())
+    ])
+
+""" def get_lpips(img1, img2, lpips, device):
   '''
   img1: torch.tensor of shape [1,C,H,W]
   img2: torch.tensor of shape [1,C,H,W]
@@ -30,7 +52,7 @@ def get_lpips(img1, img2, lpips, device):
   lpips.to(device)
   img1 = torch.clamp(img1, min=-1, max=1).to(device)
   img2 = torch.clamp(img2, min=-1, max=1).to(device)
-  return lpips(img1, img2).detach().cpu().numpy()
+  return lpips(img1, img2).detach().cpu().numpy() """
 
 def torch_to_np(img_torch):
   '''
@@ -134,11 +156,6 @@ def CSGM_Solver_Pixel_Space(measurements, x_init, num_iterations, device, operat
 
     if i % save_every == 0 or i == num_iterations-1:
       x_list.append(x.clone().detach())
-      if verbose == True:
-        plt.figure()
-        plt.title('Iter: '+str(i+1))
-        plt.imshow(torch_to_np(recon))
-        plt.show()
     
   return x_list[-1], x_list
 
@@ -176,11 +193,6 @@ def Diffusion_Purified_CSGM(model, img_gt, total_num_iterations, csgm_num_iterat
         measurements = operator.forward(img_gt)
   
     measurements = measurements+torch.randn(measurements.shape).to(device)*noise_std
-    
-    plt.figure()
-    plt.imshow(torch_to_np(normalize_image(measurements)))
-    plt.title('Measurements')
-    plt.savefig(root_path+'measurements.png')
 
     x = torch.zeros(img_gt.shape, device=device, requires_grad=True)
     x_list_complete = []
@@ -256,23 +268,6 @@ def Diffusion_Purified_CSGM(model, img_gt, total_num_iterations, csgm_num_iterat
         x_list_complete = x_list_complete + x_list_sub
         x_list_complete.append(x)
 
-        if i % save_every_main == 0 or i==total_num_iterations-1:
-            if verbose == True:
-                plt.figure(figsize=(40,10))
-                plt.subplot(141)
-                plt.title('gt x')
-                plt.imshow(torch_to_np(normalize_image(img_gt)))
-                plt.subplot(142)
-                plt.title('x')
-                plt.imshow(torch_to_np(normalize_image(x_prev)))
-                plt.subplot(143)
-                plt.title('x_noisy')
-                plt.imshow(torch_to_np(normalize_image(x_noisy)))
-                plt.subplot(144)
-                plt.title('x_purified')
-                plt.imshow(torch_to_np(normalize_image(x_purified)))
-                fig_name = 'Iter_'+str(i)+'.png'
-                plt.savefig(root_path+fig_name)
     return x, x_list_complete
 
 
@@ -292,6 +287,10 @@ def main():
   device_str = f"cuda:{args.gpu}" if torch.cuda.is_available() else 'cpu'
   logger.info(f"Device set to {device_str}.")
   device = torch.device(device_str)  
+
+  #metrics
+  psnr_metric = PSNRMetric(max_val=1)    
+  lpips_metric = lpips.LPIPS(net='vgg').to(device).eval()
 
   # Load configurations
   model_config = load_yaml(args.model_config)
@@ -338,7 +337,7 @@ def main():
   inverse_problem_type = measure_config['operator']['name']
   if inverse_problem_type == 'inpainting':
       mask = torch.ones(img_size)
-      mask[:,:,100:200,100:200] = 0
+      mask[:,:,95:159,95:159] = 0
       mask = mask.to(device)
   else:
       mask = None
@@ -368,9 +367,8 @@ def main():
       weight_decay_lambda = 0
   path_0 = os.path.join(out_path, dataset_name, 'noise_std_'+str(noise_std), str(ddim_init_timestep)+'_'+str(ddim_end_timestep)+'_'+str(total_num_iterations)+'_'+str(csgm_num_iterations)+'_'+purification_schedule+'_'+str(lr)+'_'+str(momentum)+'_'+str(full_ddim)+'_'+str(ddim_num_iterations)+'_'+str(weight_decay_lambda))
 
-  for i, img in enumerate(loader):
-      if i>= 10: #Modify this line if you want to test on more images
-         break
+  for i, img in enumerate(tqdm(loader, desc="Processing images", total=len(loader))):
+  #for i, img in enumerate(loader):
       img = img.to(device)
       root_path = path_0 + '/img_' + str(i) + '/'
       isExist = os.path.exists(root_path)
@@ -393,92 +391,42 @@ def main():
                                                       save_every_sub=save_every_sub, verbose=True, root_path=figure_root_path)
       
       # Save the intermediate reconstructions
-      torch.save(x_list_complete,root_path+'x_list_complete.pt')
+      # torch.save(x_list_complete,root_path+'x_list_complete.pt')
 
-      img_np = torch_to_np(img)
-      img_np = np.clip(img_np,-1,1)
-      img_np = (img_np+1)/2
       PSNR_list = []
-      SSIM_list = []
       LPIPS_list = []
       # Here we calculate the standard metrics on every intermediate reconstrucitons, which is time-costly. Comment the lines below if you want to reconstruct the images at a faster speed.
       for j in range(len(x_list_complete)):
-        x = x_list_complete[j]
-        recon = x.detach().cpu()
-        recon_np = recon[0].permute(1,2,0).numpy()
-        recon_np = np.clip(recon_np,-1,1)
-        recon_np = (recon_np+1)/2
-        PSNR_list.append(peak_signal_noise_ratio(img_np,recon_np))
-        SSIM_list.append(compare_ssim(img_np, recon_np, channel_axis=2, data_range=1, gaussian_weights=True, sigma=1.5, use_sample_covariance=False))
-        LPIPS_list.append(get_lpips(img,recon,lpips=lpips,device=device))
-
-      # Visualize PSNR, SSIM and LPIPS
-      plt.figure(figsize=(30,10))
-      plt.subplot(131)
-      plt.plot(PSNR_list)
-      plt.xlabel('Iteration/10')
-      plt.title('CSGM Results for '+ inverse_problem_type+' (PSNR)')
-
-      plt.subplot(132)
-      plt.plot(SSIM_list)
-      plt.xlabel('Iteration/10')
-      plt.title('CSGM Results for '+ inverse_problem_type+' (SSIM)')
-
-      plt.subplot(133)
-      plt.plot(LPIPS_list)
-      plt.xlabel('Iteration/10')
-      plt.title('CSGM Results for '+ inverse_problem_type+' (LPIPS)')
-      plt.savefig(figure_root_path+'metrics.png')
+        recon = x_list_complete[j]
+        PSNR_list.append(psnr_metric(inv_transform(img), inv_transform(recon)).item())
+        LPIPS_list.append(lpips_metric(inv_transform(img), inv_transform(recon)).item())
       
-      print('Final PSNR: ',PSNR_list[-1],'Final SSIM: ',SSIM_list[-1],'Final LPIPS: ',LPIPS_list[-1])
+      print('Final PSNR: ',PSNR_list[-1],'Final LPIPS: ',LPIPS_list[-1]) #'Final SSIM: ',SSIM_list[-1]
 
       PSNR_list = np.array(PSNR_list)
-      SSIM_list = np.array(SSIM_list)
       LPIPS_list = np.array(LPIPS_list)
-      torch.save(PSNR_list, root_path+'/PSNR_list.pt')
-      torch.save(SSIM_list, root_path+'/SSIM_list.pt')
-      torch.save(LPIPS_list, root_path+'/LPIPS_list.pt')
 
       PSNR_list_All.append(PSNR_list)
-      SSIM_list_All.append(SSIM_list)
       LPIPS_list_All.append(LPIPS_list)
   PSNR_list_All = np.array(PSNR_list_All)
-  SSIM_list_All = np.array(SSIM_list_All)
   LPIPS_list_All = np.array(LPIPS_list_All)
 
   avg_PSNR_list = np.mean(PSNR_list_All, axis=0)
   std_PSNR_list = np.std(PSNR_list_All, axis=0)
 
-  avg_SSIM_list = np.mean(SSIM_list_All, axis=0)
-  std_SSIM_list = np.std(SSIM_list_All, axis=0)
-
   avg_LPIPS_list = np.mean(LPIPS_list_All, axis=0)
   std_LPIPS_list = np.mean(LPIPS_list_All, axis=0)
 
-  print('Final average PSNR: ',avg_PSNR_list[-1],'Final average SSIM: ', avg_SSIM_list[-1],'Final average LPIPS: ',avg_LPIPS_list[-1])
-  print('Final std PSNR: ',std_PSNR_list[-1],'Final std SSIM: ', std_SSIM_list[-1],'Final std LPIPS: ',std_LPIPS_list[-1])
+  print('Final average PSNR: ',avg_PSNR_list[-1],'Final average LPIPS: ',avg_LPIPS_list[-1]) #'Final average SSIM: ', avg_SSIM_list[-1]
+  print('Final std PSNR: ',std_PSNR_list[-1],'Final std LPIPS: ',std_LPIPS_list[-1]) #'Final std SSIM: ', std_SSIM_list[-1]
 
-  plt.figure(figsize=(30,10))
-  plt.subplot(131)
-  plt.plot(avg_PSNR_list)
-  plt.xlabel('Iteration')
-  plt.title('PSNR')
-
-  plt.subplot(132)
-  plt.plot(avg_SSIM_list)
-  plt.xlabel('Iteration')
-  plt.title('SSIM')
-
-  plt.subplot(133)
-  plt.plot(avg_LPIPS_list)
-  plt.xlabel('Iteration/5')
-  plt.title('LPIPS')
-      
-  plt.savefig(path_0+'/avg_metrics.png')
-
-  torch.save(avg_PSNR_list, path_0 + '/avg_PSNR_list.pt')
-  torch.save(avg_SSIM_list, path_0 + '/avg_SSIM_list.pt')
-  torch.save(avg_LPIPS_list, path_0 + '/avg_LPIPS_list.pt')    
+  averages = {}
+  averages["psnr_avg"] = avg_PSNR_list[-1]
+  averages["lpips_avg"] = avg_LPIPS_list[-1]
+        
+  save_path = os.path.join(out_path, "metrics_avg.json")
+  with open(save_path, "w") as f:
+    json.dump(averages, f, indent=4)
 
 
 if __name__ == '__main__':

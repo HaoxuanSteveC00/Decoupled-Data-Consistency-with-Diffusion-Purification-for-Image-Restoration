@@ -183,8 +183,10 @@ class GaussianDiffusion:
 
         img_list = []
 
-        pbar = tqdm(list(range(self.num_timesteps))[::-1])
-        for idx in pbar:
+        #pbar = tqdm(list(range(self.num_timesteps))[::-1])
+        #for idx in pbar:
+        for idx in range(self.num_timesteps)[::-1]:
+            #print(idx)
             time = torch.tensor([idx] * img.shape[0], device=device)
             
             img = img.requires_grad_()
@@ -202,7 +204,8 @@ class GaussianDiffusion:
                                       x_0_hat=out['pred_xstart'])
             img = img.detach_()
            
-            pbar.set_postfix({'distance': distance.item()}, refresh=False)
+            #pbar.set_postfix({'distance': distance.item()}, refresh=False)
+            
             if record:
                 if idx % 10 == 0 or idx==self.num_timesteps-1:
                     img_list.append(img)

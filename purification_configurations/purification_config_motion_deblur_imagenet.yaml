@@ -3,11 +3,11 @@ purification:
   csgm_num_iterations: 100
   purification_schedule: linear
   save_every_main: 1000000
-  save_every_sub: 10000000
+  save_every_sub: 1000000
   optimizer: SGD
-  lr: 10 #1e5
+  lr: 10
   momentum: 0.9
-  ddim_num_iterations: 100 #20
+  ddim_num_iterations: 100
   full_ddim: True
   ddim_init_timestep: 400
   ddim_end_timestep: 0
@@ -15,8 +15,8 @@ purification:
   weight_decay_lambda: 0
 
 dataset:
-  name: ffhq
-  root: ./data/ffhq
+  name: imagenet
+  root: ./data/imagenet
 
 others:
   img_size: !!python/tuple [1,3,256,256]
